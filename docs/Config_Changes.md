@@ -6,6 +6,10 @@ All dates in this document are approximate.
 
 # Changes
 
+202010??: The neopixel `color_order_GRB` config option has been
+removed. If necessary, update the config to set the new `color_order`
+option to RGB, GRB, RGBW, or GRBW.
+
 20201020: Klipper v0.9.0 released.
 
 20200902: The RTD resistance-to-temperature calculation for MAX31865
