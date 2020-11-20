@@ -42,6 +42,8 @@ class MCU_ADS1100:
         self.config_single = self.config_contiuous | 1 << 4 | 1 << 7
 
     def setup_adc_callback(self, report_time, callback):
+        if report_time is not None:
+          self.report_time = report_time
         self._write_configuration(self.config_contiuous)
         self.reactor.update_timer(self.sample_timer, self.reactor.NOW)
         self._callback = callback
@@ -53,7 +55,7 @@ class MCU_ADS1100:
     def get_last_value(self):
         return self._last_value, self.measured_time
 
-    def read_current_value(self):
+    def read_single_value(self):
         # start conversion
         self._write_configuration(self.config_single)
         # wait until conversion is ready
@@ -64,13 +66,15 @@ class MCU_ADS1100:
             # busy bit cleared
             return struct.unpack('>h', response[0:2])[0]
 
+    def continue_contiuous_reading(self):
+        self._write_configuration(self.config_contiuous)
+
     def _handle_ready(self):
         pass
 
     def _sample_ads1100(self, eventtime):
         try:
             self._last_value = self._read_result()
-            logging.info("ads1100: _sample_ads1100: %d" % self._last_value)
         except Exception:
             logging.exception("ads1100: Error reading data")
             self._last_value = 0
@@ -78,7 +82,7 @@ class MCU_ADS1100:
 
         self.measured_time = self.reactor.monotonic()
         if self._callback != None :
-          self._callback(self.mcu.estimated_print_time(measured_time),
+          self._callback(self.mcu.estimated_print_time(self.measured_time),
               self._last_value)
         return self.measured_time + self.report_time
 
