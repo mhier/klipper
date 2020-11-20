@@ -1,7 +1,7 @@
 # Support for bed level probes featuring a load cell at which the hotend is
 # suspended.
 #
-# Copyright (C) 2020  Martin Hierholzer <martin@hierholzer.info>
+# Copyright (C) 2020 Martin Hierholzer <martin@hierholzer.info>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 

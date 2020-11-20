@@ -2,7 +2,7 @@
 # on the required extrusion force measured by the load cell probe. Requires
 # to enable the load_cell_probe module.
 #
-# Copyright (C) 2020  Martin Hierholzer <martin@hierholzer.info>
+# Copyright (C) 2020 Martin Hierholzer <martin@hierholzer.info>
 #
 # Based on the implementation by Nibbles/Wessix on:
 # https://github.com/RF1000community/Repetier-Firmware
