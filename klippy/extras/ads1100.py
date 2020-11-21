@@ -25,7 +25,7 @@ class MCU_ADS1100:
         self.gain = main.gain
         self._last_value = 0.
         self._last_time = datetime.datetime.now()
-        self.sample_timer = self.reactor.register_timer(self._sample_ads1100)
+        self.sample_timer = None
         main.printer.add_object("ads1100 " + main.name, self)
         main.printer.register_event_handler("klippy:ready", self._handle_ready)
 
@@ -34,7 +34,7 @@ class MCU_ADS1100:
         query_adc.register_adc(qname, self)
         self._callback = None
 
-        self._is_continuous = True
+        self._is_continuous = False
 
         # configuration byte: continuous conversion (no SC bit set), selected
         # gain and SPS
@@ -46,9 +46,8 @@ class MCU_ADS1100:
     def setup_adc_callback(self, report_time, callback):
         if report_time is not None:
           self.report_time = report_time
-        self._write_configuration(self.config_contiuous)
-        self.reactor.update_timer(self.sample_timer, self.reactor.NOW)
         self._callback = callback
+        self.continue_contiuous_reading()
 
     def setup_minmax(self, sample_time, sample_count, minval, maxval,
                      range_check_count):
@@ -77,7 +76,7 @@ class MCU_ADS1100:
             return struct.unpack('>h', response[0:2])[0]
 
     def continue_contiuous_reading(self):
-        if self._is_continuous :
+        if self._is_continuous or self._callback == None:
           return
         self._is_continuous = True
         self._write_configuration(self.config_contiuous)
