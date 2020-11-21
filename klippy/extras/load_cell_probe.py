@@ -247,11 +247,13 @@ class LoadCellProbe:
           self._move_z_relative(-self.compensation_z_lift + current_step_size)
 
     def run_probe(self, gcmd):
-        v = self.mcu_adc.read_single_value()
         self.tool = self.printer.lookup_object('toolhead')
 
         # wait until toolhead is in position
         self.tool.wait_moves()
+
+        # make sure ADC is in sigle value mode
+        v = self.mcu_adc.read_single_value()
 
         # fast, coarse approach
         self._fast_approach(gcmd)

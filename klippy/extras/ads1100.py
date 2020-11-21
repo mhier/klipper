@@ -34,6 +34,8 @@ class MCU_ADS1100:
         query_adc.register_adc(qname, self)
         self._callback = None
 
+        self._is_continuous = True
+
         # configuration byte: continuous conversion (no SC bit set), selected
         # gain and SPS
         self.config_contiuous = ADS1100_SAMPLE_RATE_TABLE[self.rate] << 2 \
@@ -56,25 +58,42 @@ class MCU_ADS1100:
         return self._last_value, self.measured_time
 
     def read_single_value(self):
+        if self._is_continuous :
+          self._is_continuous = False
+          self.reactor.unregister_timer(self.sample_timer)
+
         # start conversion
         self._write_configuration(self.config_single)
         # wait until conversion is ready
         while True :
           result = self.i2c.i2c_read([], 3)
           response = bytearray(result['response'])
+          if len(response) < 3:
+            logging.info("ADS1100: single conversion failed, trying again...")
+            self._write_configuration(self.config_single)
+            continue
           if response[2] & 1<<7 == 0 :
             # busy bit cleared
             return struct.unpack('>h', response[0:2])[0]
 
     def continue_contiuous_reading(self):
+        if self._is_continuous :
+          return
+        self._is_continuous = True
         self._write_configuration(self.config_contiuous)
+        self.sample_timer = self.reactor.register_timer(self._sample_ads1100,
+            self.reactor.NOW)
 
     def _handle_ready(self):
         pass
 
     def _sample_ads1100(self, eventtime):
+        if not self._is_continuous :
+          return self.reactor.NEVER
         try:
             self._last_value = self._read_result()
+            if not self._is_continuous :
+              return self.reactor.NEVER
         except Exception:
             logging.exception("ads1100: Error reading data")
             self._last_value = 0
