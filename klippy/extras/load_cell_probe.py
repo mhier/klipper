@@ -74,13 +74,13 @@ class LoadCellProbe:
         self.max_abs_force = \
             config.getint('max_abs_force', 5000, minval=self.threshold+1)
 
-        self.fit_z_start_offset = \
-            config.getint('fit_z_start_offset', 0.015)
-        self.additional_fit_points = config.getint('additional_fit_points', 10,
+        self.fit_start_offset = \
+            config.getint('fit_start_offset', 0.012)
+        self.additional_fit_points = config.getint('additional_fit_points', 12,
             minval=2)
-        self.fit_step_size = config.getfloat('fit_step_size', 0.002, above=0.)
+        self.fit_step_size = config.getfloat('fit_step_size', 0.0015, above=0.)
         self.fit_min_quality = \
-            config.getfloat('fit_min_quality', 0.98, above=0.)
+            config.getfloat('fit_min_quality', 0.95, above=0.)
 
         self.sample_retract_dist = config.getfloat('sample_retract_dist', 2.,
                                                    above=0.)
