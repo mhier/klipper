@@ -142,9 +142,17 @@ class LoadCellProbe:
         self.tool.manual_move([pos[0],pos[1],pos[2]+length], self.speed)
 
 
-    def _move_z_absolute(self, position):
+    def _move_axis_relative(self, length):
+        # move along selected probing axis
         pos = self.tool.get_position()
-        self.tool.manual_move([pos[0],pos[1],position], self.speed)
+        pos[self.probing_axis] += length
+        self.tool.manual_move([pos[0],pos[1],pos[2]], self.speed)
+
+
+    def _move_axis_absolute(self, position):
+        pos = self.tool.get_position()
+        pos[self.probing_axis] = position
+        self.tool.manual_move([pos[0],pos[1],pos[2]], self.speed)
 
 
     def _average_force(self, gcmd, precise):
@@ -195,7 +203,7 @@ class LoadCellProbe:
               % (self.tool.get_position()[2], force))
           if(abs(force) > self.threshold):
             break
-          self._move_z_relative(-self.step_size)
+          self._move_axis_relative(-self.step_size)
 
 
     def _fast_approach(self, gcmd):
@@ -248,14 +256,14 @@ class LoadCellProbe:
         self._move_z_relative(self.compensation_z_lift)
         time.sleep(self.delay_compensation_lift)
         force_out = self._average_force(gcmd,True)
+        self._move_z_relative(-self.compensation_z_lift)
         force = force_in - force_out
 
         # store and log result
         self._data.append(
-          (self.tool.get_position()[2]-self.compensation_z_lift, force))
+          (self.tool.get_position()[2], force))
         gcmd.respond_info("z = %f, step size %f, force = %d" %
-            (self.tool.get_position()[2]-self.compensation_z_lift,
-             self.current_step_size, force))
+            (self.tool.get_position()[2], self.current_step_size, force))
 
         return force
 
@@ -323,8 +331,7 @@ class LoadCellProbe:
           if abs(self.current_step_size) < self.precision_goal :
             gcmd.respond_info("Search completed.")
             # return Z position before compensation step
-            return self.tool.get_position()[2] - self.compensation_z_lift - \
-                self.current_step_size/2
+            return self.tool.get_position()[2] - self.current_step_size/2
 
           # check failure condition
           if abs(self.current_step_size) >= abs(attempt_start_step_size) :
@@ -336,8 +343,7 @@ class LoadCellProbe:
             attempt_start_step_size = self.current_step_size
 
           # move to new position (incl. reverse compensation step)
-          self._move_z_relative(-self.compensation_z_lift +
-              self.current_step_size)
+          self._move_axis_relative(self.current_step_size)
 
 
     def _perform_fit(self, gcmd, split_point):
@@ -347,13 +353,13 @@ class LoadCellProbe:
         self._data = []
 
         # take additional measurements
-        self._move_z_absolute(split_point + self.fit_z_start_offset)
+        self._move_axis_absolute(split_point + self.fit_start_offset)
         n = self.additional_fit_points
         while n > 0:
           force = self._compensated_measurement(gcmd)
           if abs(force) > self.threshold :
             n -= 1
-          self._move_z_relative(-self.fit_step_size-self.compensation_z_lift)
+          self._move_axis_relative(-self.fit_step_size)
 
         # prepare data for linear regression with measuerments below split point
         forces = []
@@ -378,6 +384,9 @@ class LoadCellProbe:
 
     def run_probe(self, gcmd):
         self.tool = self.printer.lookup_object('toolhead')
+
+        # probe in Z direction
+        self.probing_axis = 2
 
         # wait until toolhead is in position
         self.tool.wait_moves()
@@ -456,5 +465,6 @@ class LoadCellProbe:
 def load_config(config):
     probe = LoadCellProbe(config)
     config.printer.add_object('probe', probe)
+    config.printer.add_object('probe_xy', probe)
     config.printer.add_object('load_cell', probe)
     return probe
