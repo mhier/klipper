@@ -4,7 +4,7 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
-import logging, struct, time, datetime
+import logging, struct
 from . import bus
 
 ADS1100_CHIP_ADDR=0x49
@@ -27,7 +27,7 @@ class MCU_ADS1100:
         self.rate = main.rate
         self.gain = main.gain
         self._last_value = 0.
-        self._last_time = datetime.datetime.now()
+        self._last_time = 0
         self.sample_timer = None
         main.printer.add_object("ads1100 " + main.name, self)
 
@@ -81,18 +81,13 @@ class MCU_ADS1100:
     def _read_response(self):
         while True :
           # read with error handling, spurious errors are possible
-          try :
-            result = self.i2c.i2c_read([], 2)
-          except Exception:
-            logging.info("ADS1100: error reading I2C, retrying")
-            continue
+          result = self.i2c.i2c_read([], 2)
 
           response = bytearray(result['response'])
 
           # retry if response too short
           if len(response) < 2:
-            logging.info("ADS1100: single conversion failed, trying again...")
-            self._write_configuration(self.config_single)
+            logging.info("ADS1100: conversion failed, trying again...")
             continue
 
           # return response

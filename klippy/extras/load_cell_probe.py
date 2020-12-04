@@ -5,7 +5,7 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
-import logging, time, math
+import logging, math
 
 
 def fit(X, Y):
@@ -19,71 +19,107 @@ def fit(X, Y):
         normalizer = len(Xs) - 1
         return math.sqrt(sum((pow(x - m, 2) for x in Xs)) / normalizer)
 
-    def pearson_r(Xs, Ys):
+    sum_xy = 0
+    sum_sq_v_x = 0
+    sum_sq_v_y = 0
+    sum_sq_x = 0
 
-        sum_xy = 0
-        sum_sq_v_x = 0
-        sum_sq_v_y = 0
+    for (x, y) in zip(X, Y):
+        var_x = x - m_X
+        var_y = y - m_Y
+        sum_xy += var_x * var_y
+        sum_sq_v_x += pow(var_x, 2)
+        sum_sq_v_y += pow(var_y, 2)
+        sum_sq_x += pow(x, 2)
 
-        for (x, y) in zip(Xs, Ys):
-            var_x = x - m_X
-            var_y = y - m_Y
-            sum_xy += var_x * var_y
-            sum_sq_v_x += pow(var_x, 2)
-            sum_sq_v_y += pow(var_y, 2)
-        return sum_xy / math.sqrt(sum_sq_v_x * sum_sq_v_y)
+    # Number of data points
+    n = len(X)
+    logging.info("n: %d" % n)
 
-    r = pearson_r(X, Y)
+    # Pearson R
+    r = sum_xy / math.sqrt(sum_sq_v_x * sum_sq_v_y)
 
+    # Slope
     m = r * (std(Y, m_Y) / std(X, m_X))
+
+    # Intercept
     b = m_Y - m * m_X
 
-    return [m,b,r]
+    logging.info("m: %f" % m)
+    logging.info("b: %f" % b)
+    logging.info("r: %f" % r)
 
+    # Estimate measurement error from resuduals
+    sum_res_sq = 0
+    for (x, y) in zip(X, Y):
+        res = m*x + b - y
+        sum_res_sq += pow(res,2)
+    logging.info("sum_res_sq: %f" % sum_res_sq)
+    logging.info("sum_sq_v_x: %f" % sum_sq_v_x)
+    logging.info("sum_sq_x: %f" % sum_sq_x)
+
+    # Error on slope
+    sm = math.sqrt(1./(n-2) * sum_res_sq / sum_sq_v_x)
+    logging.info("sm: %f" % sm)
+
+    # Error on intercept
+    sb = sm * math.sqrt(1./n * sum_sq_x)
+    logging.info("sb: %f" % sb)
+
+    return [m,b,r,sm,sb]
+
+
+def takeFirst(elem):
+    return elem[0]
 
 
 class LoadCellProbe:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.name = config.get_name()
+        self.reactor = self.printer.get_reactor()
 
         pin_name = config.get('adc')
         ppins = self.printer.lookup_object('pins')
         self.mcu_adc = ppins.setup_pin('adc', pin_name)
 
+        # general parameters
         self.speed = config.getfloat('speed', 50.0, above=0.)
-        self.lift_speed = config.getfloat('lift_speed', self.speed, above=0.)
+        self.max_retry = config.getint('max_retry', 5, minval=0)
+        self.max_abs_force = \
+            config.getint('max_abs_force', 5000, minval=0)
 
+        # parameters for force measurement
         self.adc_n_average = config.getint('adc_n_average', 2, minval=1)
         self.adc_n_average_precise = config.getint('adc_n_average_precise',
           3, minval=self.adc_n_average)
-        
-        self.threshold = config.getint('threshold', 12, minval=1)
-        self.step_size = config.getfloat('step_size', 0.05, above=0.)
-        self.incr_step_after_n_same_dir = \
-            config.getint('incr_step_after_n_same_dir', 2, minval=1)
-        self.precision_goal = config.getfloat('precision_goal', 0.01, above=0.)
         self.max_variance = config.getint('max_variance', 15, minval=0)
         self.delay_exceeding_max_variance = \
             config.getfloat('delay_exceeding_max_variance', 0.1, above=0.)
-        self.max_retry = config.getint('max_retry', 100, minval=0)
+        self.max_retry_stable_force = \
+            config.getint('max_retry_stable_force', 100, minval=0)
+
+        # parameters for fast approach
+        self.threshold = config.getint('threshold', 50, minval=1)
+        self.step_size = config.getfloat('step_size', 0.05, above=0.)
+
+        # parameters for compensated force measurement
         self.compensation_z_lift = \
             config.getfloat('compensation_z_lift', 0.2, minval=self.step_size)
         self.delay_compensation_lift = \
-            config.getfloat('delay_compensation_lift', 0.5, above=0.)
-        self.max_abs_force = \
-            config.getint('max_abs_force', 5000, minval=self.threshold+1)
+            config.getfloat('delay_compensation_lift', 0.6, above=0.)
 
-        self.fit_start_offset = \
-            config.getint('fit_start_offset', 0.012)
-        self.additional_fit_points = config.getint('additional_fit_points', 12,
-            minval=2)
-        self.fit_step_size = config.getfloat('fit_step_size', 0.0015, above=0.)
-        self.fit_min_quality = \
-            config.getfloat('fit_min_quality', 0.95, above=0.)
+        # parameters for fit
+        self.fit_points = config.getint('fit_points', 5, minval=3)
+        self.fit_step_size = config.getfloat('fit_step_size', 0.005, above=0.)
+        self.fit_min_quality = config.getfloat('fit_min_quality', 0.95,
+            above=0.)
+        self.fit_threshold = config.getint('fit_threshold', 6, minval=1)
 
+        # parameters for probe accuracy
         self.sample_retract_dist = config.getfloat('sample_retract_dist', 2.,
                                                    above=0.)
+        self.lift_speed = config.getfloat('lift_speed', self.speed, above=0.)
 
         self.force_offset = 0
         self.force_subscribers = []
@@ -170,14 +206,14 @@ class LoadCellProbe:
           force = 0.
           min_force = +1e6
           max_force = -1e6
-          for i in range(0, self.adc_n_average) :
+          for i in range(0, n_average) :
             val = self.mcu_adc.read_single_value()
             force = force + val
             min_force = min(val,min_force)
             max_force = max(val,max_force)
 
           if max_force - min_force < self.max_variance:
-            force = force / self.adc_n_average
+            force = force / n_average
             if abs(force) > self.max_abs_force :
               # lift tool head to prevent permament strong force applied to head
               # and bed
@@ -185,10 +221,11 @@ class LoadCellProbe:
               raise gcmd.error("Maximum absolute force exceeded.")
             return force
 
-          time.sleep(self.delay_exceeding_max_variance)
+          self.reactor.pause(self.reactor.monotonic() +
+            self.delay_exceeding_max_variance)
 
           attempt = attempt+1
-          if attempt > self.max_retry :
+          if attempt > self.max_retry_stable_force :
             raise gcmd.error("Unstable force reading, maximum retries "
                 "exceeded.")
 
@@ -199,7 +236,7 @@ class LoadCellProbe:
           # Check threshold before first movement, to prevent doing an unchecked
           # step after a retry
           force = self._average_force(gcmd,False) - self.force_offset
-          gcmd.respond_info("z = %f, force = %d"
+          gcmd.respond_info("z = %f, force = %.1f"
               % (self.tool.get_position()[2], force))
           if(abs(force) > self.threshold):
             break
@@ -212,7 +249,8 @@ class LoadCellProbe:
         # it matches, the contact is assumed. If not, the force_offset has
         # drifed and the search is continued with the new offset.
         gcmd.respond_info("Commencing fast approach.")
-        time.sleep(self.delay_compensation_lift)
+        self.reactor.pause(self.reactor.monotonic() +
+          self.delay_compensation_lift)
         self.force_offset = self._average_force(gcmd,True)
         attempt = 0
         attempt_start_pos = self.tool.get_position()[2]
@@ -221,20 +259,16 @@ class LoadCellProbe:
           # lower tool head until force threshold is exceeded
           self._lower_to_threshold(gcmd)
 
-          # confirm contact with new offset measured after compensation lift
-          self._move_z_relative(self.compensation_z_lift)
-          time.sleep(self.delay_compensation_lift)
-          self.force_offset = self._average_force(gcmd,True)
-          self._move_z_relative(-self.compensation_z_lift)
-          time.sleep(self.delay_compensation_lift)
-          force = self._average_force(gcmd,True) - self.force_offset
+          # confirm contact with compensated measuerment (also updating the
+          # force_offset)
+          force = self._compensated_measurement(gcmd)
 
           # if contact is confirmed with new measurement, terminate fast
           # approach
           if(abs(force) > self.threshold):
             # stay at slightly z-lifted position without contact when returning
             gcmd.respond_info("Fast approach found contact.")
-            return
+            return force
 
           # check for failure condition
           attempt_dist = attempt_start_pos - self.tool.get_position()[2]
@@ -249,134 +283,72 @@ class LoadCellProbe:
 
 
     def _compensated_measurement(self, gcmd):
-        # take compensated measurement, will increase z position by
-        # self.compensation_z_lift
-        time.sleep(self.delay_compensation_lift)
-        force_in = self._average_force(gcmd,True)
+        # take compensated measurement, update force_offset
         self._move_z_relative(self.compensation_z_lift)
-        time.sleep(self.delay_compensation_lift)
-        force_out = self._average_force(gcmd,True)
+        self.reactor.pause(self.reactor.monotonic() +
+          self.delay_compensation_lift)
+        self.force_offset = self._average_force(gcmd,True)
         self._move_z_relative(-self.compensation_z_lift)
-        force = force_in - force_out
+        self.reactor.pause(self.reactor.monotonic() +
+          self.delay_compensation_lift)
+        force_in = self._average_force(gcmd,True)
+        force = force_in - self.force_offset
 
-        # store and log result
-        self._data.append(
-          (self.tool.get_position()[2], force))
-        gcmd.respond_info("z = %f, step size %f, force = %d" %
-            (self.tool.get_position()[2], self.current_step_size, force))
+        gcmd.respond_info("z = %f, force(cmp) = %.1f" %
+            (self.tool.get_position()[2], force))
 
         return force
 
+    def _find_fit_start(self, gcmd, force0):
+        force1 = force0
+        self._move_z_relative(self.step_size)
+        while abs(force1) > self.fit_threshold*2:
+          force2 = self._compensated_measurement(gcmd)
+          if abs(force2) < self.fit_threshold*2:
+            break
+          slope = (self.step_size)/(force2-force1)
+          dist = min(abs((force2-self.fit_threshold)*slope), self.step_size)
+          self._move_z_relative(dist)
+          force1 = force2
 
-    def _iterative_search(self, gcmd):
-        # Strategy for iterative search: take series of measurements. If a
-        # measurement shows a force above the threshold move tool head away from
-        # bed; if force is below threshold move head towards bed. Whenever the
-        # direction is changed, reduce the stepsize by a factor of two. When two
-        # consecutive measurements go into same direction, increase stepsize by
-        # factor of two (up to the start value of the step size used for the
-        # fast approach).
-        # Each measurement point is compensated for the force offset. This is
-        # done by taking another measurement for each point with the tool head
-        # moved further away from the bed. This search is continued until the
-        # step size is below our precision goal.
-        gcmd.respond_info("Commencing iterative search.")
-        self.current_step_size = +self.step_size   # sign determines direction
-        same_direction_counter = 0
-        attempt = 0
-        attempt_start_step_size = self.current_step_size
-
-        # lift tool head a bit to make sure the search starts without contact to
-        # the bed
-        self._move_z_relative(self.compensation_z_lift)
+    def _perform_fit(self, gcmd):
+        start = self.tool.get_position()[2]
+        gcmd.respond_info("PERFORM FIT start = %f" % start)
 
         # initialise array with measurement data
-        self._data = []
+        data = []
 
+        # take raster scan measurements to collect data for fit
         while True:
           force = self._compensated_measurement(gcmd)
 
-          # decide next action
-          # no hysteresis is used for the force threshold here, because it will
-          # fail to converge if the force is changing only slightly when the
-          # step size is very small
-          if self.current_step_size < 0:
-            # currently moving to negative Z
-            if(abs(force) > self.threshold):
-              # found contact: decrease step size and change direction
-              same_direction_counter = 0
-              self.current_step_size = -self.current_step_size/2
-            else :
-              # still no contact:
-              # increase step size, if same_direction_counter > 2
-              same_direction_counter = same_direction_counter+1
-              if same_direction_counter > self.incr_step_after_n_same_dir :
-                self.current_step_size = \
-                    -min(self.step_size, abs(2*self.current_step_size))
-          else :
-            # currently moving to positive Z
-            if(abs(force) < self.threshold):
-              # lost contact: decrease step size and change direction
-              same_direction_counter = 0
-              self.current_step_size = -self.current_step_size/2
-            else :
-              # we still have contact:
-              # increase step size, if same_direction_counter > 2
-              same_direction_counter = same_direction_counter+1
-              if same_direction_counter > self.incr_step_after_n_same_dir :
-                self.current_step_size = \
-                    +min(self.step_size, abs(2*self.current_step_size))
-
           # check abort condition
-          if abs(self.current_step_size) < self.precision_goal :
-            gcmd.respond_info("Search completed.")
-            # return Z position before compensation step
-            return self.tool.get_position()[2] - self.current_step_size/2
+          if len(data) >= self.fit_points:
+            break
 
-          # check failure condition
-          if abs(self.current_step_size) >= abs(attempt_start_step_size) :
-            attempt = attempt + 1
-            if attempt > self.max_retry :
-              raise gcmd.error("Iterative search does not converge.")
-          else :
-            attempt = 0
-            attempt_start_step_size = self.current_step_size
+          # store measurement data for linear fit
+          if abs(force) > self.fit_threshold :
+            height = self.tool.get_position()[2]
+            data.append([height, force])
 
-          # move to new position (incl. reverse compensation step)
-          self._move_axis_relative(self.current_step_size)
-
-
-    def _perform_fit(self, gcmd, split_point):
-        gcmd.respond_info("PERFORM FIT split_point = %f" % split_point)
-
-        # initialise array with measurement data
-        self._data = []
-
-        # take additional measurements
-        self._move_axis_absolute(split_point + self.fit_start_offset)
-        n = self.additional_fit_points
-        while n > 0:
-          force = self._compensated_measurement(gcmd)
-          if abs(force) > self.threshold :
-            n -= 1
+          # move to next position
           self._move_axis_relative(-self.fit_step_size)
 
-        # prepare data for linear regression with measuerments below split point
-        forces = []
-        heights = []
-        for point in self._data:
-          if abs(point[1]) > self.threshold :
-            forces.append(point[1])
-            heights.append(point[0])
+        # perform fit to find zero force contact position
+        heights = [ d[0] for d in data ]
+        forces = [ d[1] for d in data ]
+        m,b,r,sm,sb = fit(forces, heights)
 
-        # perform linear fit
-        m,b,r = fit(forces,heights)
-        gcmd.respond_info("Fit result: m = %f, b = %f, r = %f" % (m,b,r))
+        gcmd.respond_info(
+          "Fit result: m = %f, b = %f, r = %f, sm = %f, sb = %f"
+          % (m,b,r,sm,sb))
 
         # safety check: r must be big enough
         if abs(r) < self.fit_min_quality :
-          raise gcmd.error("Fit failed, r too small: %f < %f" %
-              (abs(r), self.fit_min_quality))
+          gcmd.respond_info(
+            "Fit failed, fit quality factor r too small: %f < %f" %
+            (abs(r), self.fit_min_quality))
+          return None
 
         # return 0-force offset
         return b
@@ -391,14 +363,25 @@ class LoadCellProbe:
         # wait until toolhead is in position
         self.tool.wait_moves()
 
-        # fast, coarse approach
-        self._fast_approach(gcmd)
+        repeat_count=0
+        while True:
+          # fast, coarse approach
+          force = self._fast_approach(gcmd)
 
-        # precise interative search
-        split_point = self._iterative_search(gcmd)
+          # precise interative search
+          #start = self._iterative_search(gcmd)
+          self._find_fit_start(gcmd, force)
 
-        # perform fit
-        result = self._perform_fit(gcmd, split_point)
+          # perform raster scan and fit
+          result = self._perform_fit(gcmd)
+          if result is not None:
+            break
+
+          # check abort condition
+          repeat_count += 1
+          if repeat_count > self.max_retry:
+            gcmd.raise_error("Maximum retries reached, giving up.")
+          gcmd.respond_info("Retrying...")
 
         pos = self.tool.get_position()
         gcmd.respond_info("FINISHED z = %f" % result)
