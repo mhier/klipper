@@ -101,7 +101,7 @@ class LoadCellProbe:
 
         # parameters for fast approach
         self.threshold = config.getint('threshold', 50, minval=1)
-        self.step_size = config.getfloat('step_size', 0.05, above=0.)
+        self.step_size = config.getfloat('step_size', 0.1, above=0.)
 
         # parameters for compensated force measurement
         self.compensation_z_lift = \
@@ -176,6 +176,7 @@ class LoadCellProbe:
     def _move_z_relative(self, length):
         pos = self.tool.get_position()
         self.tool.manual_move([pos[0],pos[1],pos[2]+length], self.speed)
+        self.tool.wait_moves()
 
 
     def _move_axis_relative(self, length):
@@ -183,12 +184,14 @@ class LoadCellProbe:
         pos = self.tool.get_position()
         pos[self.probing_axis] += length
         self.tool.manual_move([pos[0],pos[1],pos[2]], self.speed)
+        self.tool.wait_moves()
 
 
     def _move_axis_absolute(self, position):
         pos = self.tool.get_position()
         pos[self.probing_axis] = position
         self.tool.manual_move([pos[0],pos[1],pos[2]], self.speed)
+        self.tool.wait_moves()
 
 
     def _average_force(self, gcmd, precise):
@@ -301,13 +304,13 @@ class LoadCellProbe:
 
     def _find_fit_start(self, gcmd, force0):
         force1 = force0
-        self._move_z_relative(self.step_size)
+        self._move_z_relative(self.step_size/2)
         while abs(force1) > self.fit_threshold*2:
           force2 = self._compensated_measurement(gcmd)
           if abs(force2) < self.fit_threshold*2:
             break
-          slope = (self.step_size)/(force2-force1)
-          dist = min(abs((force2-self.fit_threshold)*slope), self.step_size)
+          slope = (self.step_size/2)/(force2-force1)
+          dist = min(abs((force2-self.fit_threshold)*slope), self.step_size/2)
           self._move_z_relative(dist)
           force1 = force2
 
