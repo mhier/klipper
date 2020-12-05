@@ -106,8 +106,6 @@ class LoadCellProbe:
         # parameters for compensated force measurement
         self.compensation_z_lift = \
             config.getfloat('compensation_z_lift', 0.2, minval=self.step_size)
-        self.delay_compensation_lift = \
-            config.getfloat('delay_compensation_lift', 0.6, above=0.)
 
         # parameters for fit
         self.fit_points = config.getint('fit_points', 5, minval=3)
@@ -173,25 +171,28 @@ class LoadCellProbe:
             sub(value)
 
 
-    def _move_z_relative(self, length):
+    def _move_z_relative(self, length, wait=True):
         pos = self.tool.get_position()
         self.tool.manual_move([pos[0],pos[1],pos[2]+length], self.speed)
-        self.tool.wait_moves()
+        if wait:
+          self.tool.wait_moves()
 
 
-    def _move_axis_relative(self, length):
+    def _move_axis_relative(self, length, wait=True):
         # move along selected probing axis
         pos = self.tool.get_position()
         pos[self.probing_axis] += length
         self.tool.manual_move([pos[0],pos[1],pos[2]], self.speed)
-        self.tool.wait_moves()
+        if wait:
+          self.tool.wait_moves()
 
 
-    def _move_axis_absolute(self, position):
+    def _move_axis_absolute(self, position, wait=True):
         pos = self.tool.get_position()
         pos[self.probing_axis] = position
         self.tool.manual_move([pos[0],pos[1],pos[2]], self.speed)
-        self.tool.wait_moves()
+        if wait:
+          self.tool.wait_moves()
 
 
     def _average_force(self, gcmd, precise):
@@ -252,9 +253,7 @@ class LoadCellProbe:
         # it matches, the contact is assumed. If not, the force_offset has
         # drifed and the search is continued with the new offset.
         gcmd.respond_info("Commencing fast approach.")
-        self.reactor.pause(self.reactor.monotonic() +
-          self.delay_compensation_lift)
-        self.force_offset = self._average_force(gcmd,True)
+        self.force_offset = self._average_force(gcmd,False)
         attempt = 0
         attempt_start_pos = self.tool.get_position()[2]
         while True:
@@ -288,12 +287,8 @@ class LoadCellProbe:
     def _compensated_measurement(self, gcmd):
         # take compensated measurement, update force_offset
         self._move_z_relative(self.compensation_z_lift)
-        self.reactor.pause(self.reactor.monotonic() +
-          self.delay_compensation_lift)
         self.force_offset = self._average_force(gcmd,True)
         self._move_z_relative(-self.compensation_z_lift)
-        self.reactor.pause(self.reactor.monotonic() +
-          self.delay_compensation_lift)
         force_in = self._average_force(gcmd,True)
         force = force_in - self.force_offset
 
@@ -304,14 +299,14 @@ class LoadCellProbe:
 
     def _find_fit_start(self, gcmd, force0):
         force1 = force0
-        self._move_z_relative(self.step_size/2)
+        self._move_z_relative(self.step_size/2,False)
         while abs(force1) > self.fit_threshold*2:
           force2 = self._compensated_measurement(gcmd)
           if abs(force2) < self.fit_threshold*2:
             break
           slope = (self.step_size/2)/(force2-force1)
           dist = min(abs((force2-self.fit_threshold)*slope), self.step_size/2)
-          self._move_z_relative(dist)
+          self._move_z_relative(dist,False)
           force1 = force2
 
     def _perform_fit(self, gcmd):
@@ -335,7 +330,7 @@ class LoadCellProbe:
             data.append([height, force])
 
           # move to next position
-          self._move_axis_relative(-self.fit_step_size)
+          self._move_axis_relative(-self.fit_step_size,False)
 
         # perform fit to find zero force contact position
         heights = [ d[0] for d in data ]
