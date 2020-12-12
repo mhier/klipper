@@ -240,8 +240,8 @@ class LoadCellProbe:
           # Check threshold before first movement, to prevent doing an unchecked
           # step after a retry
           force = self._average_force(gcmd,False) - self.force_offset
-          gcmd.respond_info("z = %f, force = %.1f"
-              % (self.tool.get_position()[2], force))
+          gcmd.respond_info("pos = %f, force = %.1f"
+              % (self.tool.get_position()[self.probing_axis], force))
           if(abs(force) > self.threshold):
             break
           self._move_axis_relative(-self.step_size)
@@ -255,7 +255,7 @@ class LoadCellProbe:
         gcmd.respond_info("Commencing fast approach.")
         self.force_offset = self._average_force(gcmd,False)
         attempt = 0
-        attempt_start_pos = self.tool.get_position()[2]
+        attempt_start_pos = self.tool.get_position()[self.probing_axis]
         while True:
 
           # lower tool head until force threshold is exceeded
@@ -273,7 +273,8 @@ class LoadCellProbe:
             return force
 
           # check for failure condition
-          attempt_dist = attempt_start_pos - self.tool.get_position()[2]
+          attempt_dist = \
+            attempt_start_pos - self.tool.get_position()[self.probing_axis]
           if attempt_dist < 2*self.step_size :
             attempt = attempt + 1
             if attempt > self.max_retry :
@@ -281,7 +282,7 @@ class LoadCellProbe:
                   "retries exceeded.")
           else :
             attempt = 0
-            attempt_start_pos = self.tool.get_position()[2]
+            attempt_start_pos = self.tool.get_position()[self.probing_axis]
 
 
     def _compensated_measurement(self, gcmd):
@@ -292,26 +293,25 @@ class LoadCellProbe:
         force_in = self._average_force(gcmd,True)
         force = force_in - self.force_offset
 
-        gcmd.respond_info("z = %f, force(cmp) = %.1f" %
-            (self.tool.get_position()[2], force))
+        gcmd.respond_info("pos = %f, force(cmp) = %.1f" %
+            (self.tool.get_position()[self.probing_axis], force))
 
         return force
 
     def _find_fit_start(self, gcmd, force0):
         force1 = force0
-        self._move_z_relative(self.step_size/2,False)
+        self._move_axis_relative(self.step_size/2,False)
         while abs(force1) > self.fit_threshold*2:
           force2 = self._compensated_measurement(gcmd)
           if abs(force2) < self.fit_threshold*2:
             break
           slope = (self.step_size/2)/(force2-force1)
           dist = min(abs((force2-self.fit_threshold)*slope), self.step_size/2)
-          self._move_z_relative(dist,False)
+          self._move_axis_relative(dist,False)
           force1 = force2
 
     def _perform_fit(self, gcmd):
-        start = self.tool.get_position()[2]
-        gcmd.respond_info("PERFORM FIT start = %f" % start)
+        gcmd.respond_info("PERFORM FIT")
 
         # initialise array with measurement data
         data = []
@@ -326,7 +326,7 @@ class LoadCellProbe:
 
           # store measurement data for linear fit
           if abs(force) > self.fit_threshold :
-            height = self.tool.get_position()[2]
+            height = self.tool.get_position()[self.probing_axis]
             data.append([height, force])
 
           # move to next position
@@ -352,11 +352,12 @@ class LoadCellProbe:
         return b
 
 
-    def run_probe(self, gcmd):
-        self.tool = self.printer.lookup_object('toolhead')
+    def run_probe(self, gcmd, probing_axis = 2):
+        # probe by default in Z direction
+        self.probing_axis = probing_axis
 
-        # probe in Z direction
-        self.probing_axis = 2
+        # obtain toolhead object
+        self.tool = self.printer.lookup_object('toolhead')
 
         # wait until toolhead is in position
         self.tool.wait_moves()
@@ -382,8 +383,9 @@ class LoadCellProbe:
           gcmd.respond_info("Retrying...")
 
         pos = self.tool.get_position()
-        gcmd.respond_info("FINISHED z = %f" % result)
-        return pos[0], pos[1], result
+        gcmd.respond_info("FINISHED result = %f" % result)
+        pos[self.probing_axis] = result
+        return pos[0], pos[1], pos[2]
 
 
     def cmd_PROBE_ACCURACY(self, gcmd):
@@ -391,34 +393,35 @@ class LoadCellProbe:
         sample_count = gcmd.get_int("SAMPLES", 10, minval=1)
         sample_retract_dist = gcmd.get_float("SAMPLE_RETRACT_DIST",
                                              self.sample_retract_dist, above=0.)
+        axis = gcmd.get_int("AXIS", 2, minval=0, maxval=2)
         toolhead = self.printer.lookup_object('toolhead')
         pos = toolhead.get_position()
         gcmd.respond_info("PROBE_ACCURACY at X:%.3f Y:%.3f Z:%.3f"
                           " (samples=%d retract=%.3f"
-                          " lift_speed=%.1f)\n"
+                          " lift_speed=%.1f axis=%d)\n"
                           % (pos[0], pos[1], pos[2],
                              sample_count, sample_retract_dist,
-                             lift_speed))
+                             lift_speed, axis))
         # Probe bed sample_count times
         self.multi_probe_begin()
         positions = []
         while len(positions) < sample_count:
             # Probe position
-            pos = self.run_probe(gcmd)
+            pos = self.run_probe(gcmd, axis)
             positions.append(pos)
             # Retract
-            self._move_z_relative(sample_retract_dist)
+            self._move_axis_relative(sample_retract_dist)
         self.multi_probe_end()
         # Calculate maximum, minimum and average values
-        max_value = max([p[2] for p in positions])
-        min_value = min([p[2] for p in positions])
+        max_value = max([p[axis] for p in positions])
+        min_value = min([p[axis] for p in positions])
         range_value = max_value - min_value
-        avg_value = self._calc_mean(positions)[2]
-        median = self._calc_median(positions)[2]
+        avg_value = self._calc_mean(positions)[axis]
+        median = self._calc_median(positions)[axis]
         # calculate the standard deviation
         deviation_sum = 0
         for i in range(len(positions)):
-            deviation_sum += pow(positions[i][2] - avg_value, 2.)
+            deviation_sum += pow(positions[i][axis] - avg_value, 2.)
         sigma = (deviation_sum / len(positions)) ** 0.5
         # Show information
         gcmd.respond_info(
