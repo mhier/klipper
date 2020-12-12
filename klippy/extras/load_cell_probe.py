@@ -110,7 +110,7 @@ class LoadCellProbe:
         # parameters for fit
         self.fit_points = config.getint('fit_points', 5, minval=3)
         self.fit_step_size = config.getfloat('fit_step_size', 0.005, above=0.)
-        self.fit_min_quality = config.getfloat('fit_min_quality', 0.95,
+        self.fit_min_quality = config.getfloat('fit_min_quality', 0.85,
             above=0.)
         self.fit_threshold = config.getint('fit_threshold', 6, minval=1)
 
