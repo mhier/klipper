@@ -18,7 +18,9 @@ class SensingZOffset:
         self.printer.register_event_handler("klippy:ready", self._handle_ready)
 
         self.force_threshold = config.getint('force_threshold', minval=1.)
+        self.force_threshold_default = self.force_threshold
         self.max_z_offset = config.getfloat('max_z_offset', above=0.)
+        self.max_z_offset_default = self.max_z_offset
         self.max_z_height = config.getfloat('max_z_height', 0.33, above=0.)
         self.n_average_force = config.getint('n_average_force', 10, minval=1)
         self.smoothing = config.getfloat('smoothing', 0.5, minval=0., maxval=0.99)
@@ -31,6 +33,11 @@ class SensingZOffset:
 
         self.load_cell = self.printer.lookup_object('load_cell')
         self.load_cell.subscribe_force(self.force_callback)
+
+        self.gcode = self.printer.lookup_object('gcode')
+        self.gcode.register_command('Z_SENSE_OFFSET',
+            self.Z_SENSE_OFFSET,
+            desc=self.cmd_Z_SENSE_OFFSET_help)
         
         self.z_offset = 0.
         self.force_offset = 0
@@ -38,6 +45,7 @@ class SensingZOffset:
         self.last_force = 0.
         self.averaged_force = 0.
         self.i_average = 0
+        self.enable = False
 
         # Register transform
         gcode_move = self.printer.load_object(config, 'gcode_move')
@@ -47,12 +55,26 @@ class SensingZOffset:
         self.printer.register_event_handler("homing:home_rails_end",
                                             self._handle_home_rails_end)
    
+
+    cmd_Z_SENSE_OFFSET_help = "Increase Z offset depending on measured " \
+            "extrusion pressure"
+
+    def Z_SENSE_OFFSET(self, gcmd):
+        self.max_z_offset = gcmd.get_float("MAX_Z_OFFSET",
+            self.max_z_offset_default, minval=0.)
+        self.force_threshold = gcmd.get_int("FORCE_THRESHOLD",
+            self.force_threshold_default, minval=0)
+        self.z_offset = 0.
+        self.enable = True
+
     def _handle_ready(self):
         self.tool = self.printer.lookup_object('toolhead')
+        self.enable = False
 
     def _handle_home_rails_end(self, rails):
-        self.z_offset = 0.
         self.force_offset_valid = False
+        self.z_offset = 0.
+        self.enable = False
 
     def get_position(self):
         x, y, z, e = self.normal_transform.get_position()
@@ -67,6 +89,10 @@ class SensingZOffset:
         if not self.force_offset_valid :
           self.force_offset = force
           self.force_offset_valid = True
+
+        # check if enabled
+        if not self.enable :
+          return
     
         # check if still in first layer
         if self.tool.get_position()[2] > self.max_z_height:
