@@ -244,7 +244,7 @@ class LoadCellProbe:
               % (self.tool.get_position()[self.probing_axis], force))
           if(abs(force) > self.threshold):
             break
-          self._move_axis_relative(-self.step_size)
+          self._move_axis_relative(self.probing_direction*self.step_size)
 
 
     def _fast_approach(self, gcmd):
@@ -273,8 +273,8 @@ class LoadCellProbe:
             return force
 
           # check for failure condition
-          attempt_dist = \
-            attempt_start_pos - self.tool.get_position()[self.probing_axis]
+          attempt_dist = attempt_start_pos + \
+            self.probing_direction*self.tool.get_position()[self.probing_axis]
           if attempt_dist < 2*self.step_size :
             attempt = attempt + 1
             if attempt > self.max_retry :
@@ -287,9 +287,9 @@ class LoadCellProbe:
 
     def _compensated_measurement(self, gcmd):
         # take compensated measurement, update force_offset
-        self._move_z_relative(self.compensation_z_lift)
+        self._move_z_relative(-self.probing_direction*self.compensation_z_lift)
         self.force_offset = self._average_force(gcmd,True)
-        self._move_z_relative(-self.compensation_z_lift)
+        self._move_z_relative(self.probing_direction*self.compensation_z_lift)
         force_in = self._average_force(gcmd,True)
         force = force_in - self.force_offset
 
@@ -300,14 +300,14 @@ class LoadCellProbe:
 
     def _find_fit_start(self, gcmd, force0):
         force1 = force0
-        self._move_axis_relative(self.step_size/2,False)
+        self._move_axis_relative(-self.probing_direction*self.step_size/2,False)
         while abs(force1) > self.fit_threshold*2:
           force2 = self._compensated_measurement(gcmd)
           if abs(force2) < self.fit_threshold*2:
             break
           slope = (self.step_size/2)/(force2-force1)
           dist = min(abs((force2-self.fit_threshold)*slope), self.step_size/2)
-          self._move_axis_relative(dist,False)
+          self._move_axis_relative(-self.probing_direction*dist,False)
           force1 = force2
 
     def _perform_fit(self, gcmd):
@@ -330,7 +330,8 @@ class LoadCellProbe:
             data.append([height, force])
 
           # move to next position
-          self._move_axis_relative(-self.fit_step_size,False)
+          self._move_axis_relative(self.probing_direction*self.fit_step_size,
+              False)
 
         # perform fit to find zero force contact position
         heights = [ d[0] for d in data ]
@@ -352,9 +353,10 @@ class LoadCellProbe:
         return b
 
 
-    def run_probe(self, gcmd, probing_axis = 2):
+    def run_probe(self, gcmd, probing_axis = 2, probing_direction = -1):
         # probe by default in Z direction
         self.probing_axis = probing_axis
+        self.probing_direction = probing_direction
 
         # obtain toolhead object
         self.tool = self.printer.lookup_object('toolhead')
@@ -367,8 +369,7 @@ class LoadCellProbe:
           # fast, coarse approach
           force = self._fast_approach(gcmd)
 
-          # precise interative search
-          #start = self._iterative_search(gcmd)
+          # find start position for fit (no contact but as close to surface)
           self._find_fit_start(gcmd, force)
 
           # perform raster scan and fit
@@ -394,6 +395,7 @@ class LoadCellProbe:
         sample_retract_dist = gcmd.get_float("SAMPLE_RETRACT_DIST",
                                              self.sample_retract_dist, above=0.)
         axis = gcmd.get_int("AXIS", 2, minval=0, maxval=2)
+        direction = gcmd.get_int("DIRECTION", -1, minval=-1, maxval=1)
         toolhead = self.printer.lookup_object('toolhead')
         pos = toolhead.get_position()
         gcmd.respond_info("PROBE_ACCURACY at X:%.3f Y:%.3f Z:%.3f"
@@ -407,10 +409,10 @@ class LoadCellProbe:
         positions = []
         while len(positions) < sample_count:
             # Probe position
-            pos = self.run_probe(gcmd, axis)
+            pos = self.run_probe(gcmd, axis, direction)
             positions.append(pos)
             # Retract
-            self._move_axis_relative(sample_retract_dist)
+            self._move_axis_relative(-direction*sample_retract_dist)
         self.multi_probe_end()
         # Calculate maximum, minimum and average values
         max_value = max([p[axis] for p in positions])
