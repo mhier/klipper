@@ -36,7 +36,7 @@ CFLAGS += -flto -fwhole-program -fno-use-linker-plugin -ggdb3
 
 OBJS_klipper.elf = $(patsubst %.c, $(OUT)src/%.o,$(src-y))
 OBJS_klipper.elf += $(OUT)compile_time_request.o
-CFLAGS_klipper.elf = $(CFLAGS) -Wl,--gc-sections
+CFLAGS_klipper.elf = $(CFLAGS) -Wl,--gc-sections -Wl,-Map,out/klipper.map
 
 CPPFLAGS = -I$(OUT) -P -MD -MT $@
 
@@ -51,6 +51,38 @@ Q=
 else
 Q=@
 MAKEFLAGS += --no-print-directory
+endif
+
+##### Process board hardware and firmware version
+
+ifeq ($(CONFIG_BOARD_INFO_CONFIGURE),y)
+
+ifeq ($(CONFIG_MAIN_MCU_BOARD),y)
+board_type := mcu
+else ifeq ($(CONFIG_NOZZLE_MCU_BOARD),y)
+board_type := noz
+else ifeq ($(CONFIG_BED_MCU_BOARD),y)
+board_type := bed
+endif
+
+ifneq ($(CONFIG_MCU_MENU),)
+mcu_menu := $(patsubst "%",%,$(CONFIG_MCU_MENU))
+else
+mcu_menu :=
+endif
+
+ifneq ($(CONFIG_MCU_TYPE),)
+mcu_type := $(patsubst "%",%,$(CONFIG_MCU_TYPE))
+else
+mcu_type :=
+endif
+
+board_hw_version := $(board_type)$(CONFIG_MCU_BOARD_ID)_$(CONFIG_MCU_BOARD_HW_VER)_$(mcu_menu)$(mcu_type)
+board_fw_version := $(board_type)$(CONFIG_MCU_BOARD_ID)_$(CONFIG_MCU_BOARD_FW_VER)_$(CONFIG_MCU_BOARD_FW_RESERVED)
+
+CFLAGS += -DBOARD_FW_VERSION=\"$(board_fw_version)\"
+
+export board_hw_version board_fw_version
 endif
 
 # Include board specific makefile
@@ -115,6 +147,13 @@ $(KCONFIG_CONFIG) olddefconfig: src/Kconfig
 menuconfig:
 	$(Q)$(PYTHON) lib/kconfiglib/menuconfig.py src/Kconfig
 
+	@echo "  Board HW Ver: $(board_hw_version)"
+	@echo "  Board FW Ver: $(board_fw_version)"
+
+%_defconfig: src/configs/%_defconfig
+	@echo "  Load configuration: $@"
+	$(Q)cp -v src/configs/$@ $(KCONFIG_CONFIG)
+	
 ################ Generic rules
 
 # Make definitions
